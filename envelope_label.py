@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Envelope Label Generator — 6×4 Landscape, stamps.com style
+Envelope Label Generator — 6×4 Landscape drawn, rotated CCW for 4×6 printing
 Usage:
   python envelope_label.py                  # normal, return address locked
   python envelope_label.py --change-return  # lets you edit return address
@@ -60,7 +60,6 @@ def parse_pasted_address(text):
 
     return {"name": name, "business": "", "line1": line1, "line2": line2,
             "city": city, "state": state, "zip": zip_}
-
 
 # ── PROMPTS ───────────────────────────────────────────────────────────────────
 
@@ -126,34 +125,37 @@ def format_city_line(addr):
 
 
 # ── PDF GENERATION ────────────────────────────────────────────────────────────
+# Draw in landscape (6w × 4h), then rotate the page CCW so the printer
+# sees a portrait 4w × 6h page and maps it correctly to a 4×6 label.
 
 def generate_label(return_addr, recipient_addr, output_path):
+    # Draw landscape: W=6", H=4"
     W, H = 6 * inch, 4 * inch
     c = canvas.Canvas(output_path, pagesize=(W, H))
 
     c.setFillColor(colors.white)
     c.rect(0, 0, W, H, fill=1, stroke=0)
 
-    # Return address — top left, small
+    # ── RETURN ADDRESS — top left ─────────────────────────────────────────────
     ret_lines = [return_addr["name"]]
     if return_addr.get("business"):
-        ret_lines.append(return_addr["business"].upper())
-    ret_lines.append(return_addr["line1"].upper())
+        ret_lines.append(return_addr["business"])
+    ret_lines.append(return_addr["line1"])
     if return_addr.get("line2"):
-        ret_lines.append(return_addr["line2"].upper())
-    ret_lines.append(format_city_line(return_addr).upper())
+        ret_lines.append(return_addr["line2"])
+    ret_lines.append(format_city_line(return_addr))
 
-    rx, ry = 0.28 * inch, H - 0.30 * inch
-    c.setFont("Helvetica", 8)
+    rx, ry = 0.25 * inch, H - 0.40 * inch
+    c.setFont("Helvetica", 10)
     c.setFillColor(colors.black)
     for line in ret_lines:
         c.drawString(rx, ry, line)
-        ry -= 10.5
+        ry -= 15
 
-    # Stamp placeholder — top right
+    # ── STAMP PLACEHOLDER — top right ────────────────────────────────────────
     sw, sh = 0.85 * inch, 0.95 * inch
-    sx = W - sw - 0.25 * inch
-    sy = H - sh - 0.22 * inch
+    sx = W - sw - 0.20 * inch
+    sy = H - sh - 0.20 * inch
     c.setStrokeColor(colors.HexColor("#999999"))
     c.setLineWidth(0.75)
     c.setDash(3, 3)
@@ -169,7 +171,7 @@ def generate_label(return_addr, recipient_addr, output_path):
     c.drawCentredString(sx + sw / 2, sy + sh / 2 - 10, "STAMP")
     c.drawCentredString(sx + sw / 2, sy + sh / 2 - 17, "HERE")
 
-    # Recipient address — all caps, centered
+    # ── RECIPIENT ADDRESS — all caps, centered ────────────────────────────────
     rec_lines = [recipient_addr["name"].upper()]
     if recipient_addr.get("business"):
         rec_lines.append(recipient_addr["business"].upper())
@@ -182,7 +184,8 @@ def generate_label(return_addr, recipient_addr, output_path):
     c.setFont(REC_FONT, REC_SIZE)
     max_w   = max(c.stringWidth(l, REC_FONT, REC_SIZE) for l in rec_lines)
     block_x = (W - max_w) / 2
-    start_y = (H / 2) + (len(rec_lines) * LINE_H / 2) - LINE_H * 0.3
+    total_h = len(rec_lines) * LINE_H
+    start_y = (H / 2) + (total_h / 2) - LINE_H * 0.5
 
     c.setFillColor(colors.black)
     for i, line in enumerate(rec_lines):
@@ -191,7 +194,7 @@ def generate_label(return_addr, recipient_addr, output_path):
     c.save()
 
 
-# ── ROTATE 90° CCW ────────────────────────────────────────────────────────────
+# ── ROTATE PAGE 90° CCW ───────────────────────────────────────────────────────
 
 def rotate_pdf_ccw(path):
     reader = PdfReader(path)
@@ -209,11 +212,10 @@ def main():
     change_return = "--change-return" in sys.argv
 
     print("=" * 48)
-    print("  Envelope Label Generator  (6×4 Landscape)")
+    print("  Envelope Label Generator  (6×4 → rotated 4×6)")
     print("=" * 48)
 
-    return_addr = prompt_return() if change_return else DEFAULT_RETURN
-
+    return_addr    = prompt_return() if change_return else DEFAULT_RETURN
     recipient_addr = prompt_recipient()
 
     out = input(f"\nOutput filename [{DEFAULT_OUTPUT}]: ").strip()
