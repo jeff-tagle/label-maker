@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Envelope Label Generator — 6×4 Landscape, stamps.com style
-Usage: python envelope_label.py
+Usage:
+  python envelope_label.py                  # normal, return address locked
+  python envelope_label.py --change-return  # lets you edit return address
 """
 
 from reportlab.lib.pagesizes import inch
@@ -23,24 +25,23 @@ DEFAULT_RETURN = {
 
 DEFAULT_OUTPUT = "envelope_label.pdf"
 
-# ── HELPERS ──────────────────────────────────────────────────────────────────
+# ── ADDRESS PARSING ───────────────────────────────────────────────────────────
 
 def parse_pasted_address(text):
     lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
     if lines and lines[-1].upper() in ("US", "USA", "UNITED STATES"):
         lines = lines[:-1]
-
     if len(lines) < 2:
-        print("  ⚠️  Couldn't parse — too few lines. Falling back to manual entry.")
         return None
 
-    name = lines[0]
+    name      = lines[0]
     city_line = lines[-1]
     city, state, zip_ = "", "", ""
+
     if "," in city_line:
         parts = city_line.split(",", 1)
-        city = parts[0].strip()
-        rest = parts[1].strip().split()
+        city  = parts[0].strip()
+        rest  = parts[1].strip().split()
         if len(rest) >= 2:
             state = rest[0]
             zip_  = rest[1]
@@ -61,10 +62,12 @@ def parse_pasted_address(text):
             "city": city, "state": state, "zip": zip_}
 
 
+# ── PROMPTS ───────────────────────────────────────────────────────────────────
+
 def prompt_recipient():
     print("\n── Recipient Address ──")
-    print("  Paste the address block from TCGPlayer (blank line when done),")
-    print("  OR press Enter to type it in field by field.\n")
+    print("  Paste TCGPlayer address block then hit Enter on a blank line,")
+    print("  or press Enter now to type field by field.\n")
 
     first = input("  > ").strip()
 
@@ -98,8 +101,24 @@ def prompt_recipient():
         if confirm in ("", "y", "yes"):
             return result
 
-    print("  Please re-enter manually.")
+    print("  Re-enter manually.")
     return prompt_recipient()
+
+
+def prompt_return():
+    r = DEFAULT_RETURN.copy()
+    def ask(prompt, key):
+        val = input(f"  {prompt} [{r.get(key,'')}]: ").strip()
+        return val if val else r.get(key, "")
+    print("\n── Return Address ──")
+    r["name"]     = ask("Name",      "name")
+    r["business"] = ask("Business",  "business")
+    r["line1"]    = ask("Street",    "line1")
+    r["line2"]    = ask("Apt/Suite", "line2")
+    r["city"]     = ask("City",      "city")
+    r["state"]    = ask("State",     "state")
+    r["zip"]      = ask("ZIP",       "zip")
+    return r
 
 
 def format_city_line(addr):
@@ -124,16 +143,31 @@ def generate_label(return_addr, recipient_addr, output_path):
         ret_lines.append(return_addr["line2"].upper())
     ret_lines.append(format_city_line(return_addr).upper())
 
-    RETURN_SIZE = 8
-    LINE_H_RET  = 10.5
-    rx = 0.28 * inch
-    ry = H - 0.30 * inch
-
-    c.setFont("Helvetica", RETURN_SIZE)
+    rx, ry = 0.28 * inch, H - 0.30 * inch
+    c.setFont("Helvetica", 8)
     c.setFillColor(colors.black)
     for line in ret_lines:
         c.drawString(rx, ry, line)
-        ry -= LINE_H_RET
+        ry -= 10.5
+
+    # Stamp placeholder — top right
+    sw, sh = 0.85 * inch, 0.95 * inch
+    sx = W - sw - 0.25 * inch
+    sy = H - sh - 0.22 * inch
+    c.setStrokeColor(colors.HexColor("#999999"))
+    c.setLineWidth(0.75)
+    c.setDash(3, 3)
+    c.rect(sx, sy, sw, sh)
+    c.setDash()
+    c.setStrokeColor(colors.HexColor("#CCCCCC"))
+    c.setLineWidth(0.4)
+    for yy in [sy + sh * 0.35, sy + sh * 0.65]:
+        c.line(sx + 0.08 * inch, yy, sx + sw - 0.08 * inch, yy)
+    c.setFont("Helvetica", 5.5)
+    c.setFillColor(colors.HexColor("#888888"))
+    c.drawCentredString(sx + sw / 2, sy + sh / 2 - 3,  "PLACE")
+    c.drawCentredString(sx + sw / 2, sy + sh / 2 - 10, "STAMP")
+    c.drawCentredString(sx + sw / 2, sy + sh / 2 - 17, "HERE")
 
     # Recipient address — all caps, centered
     rec_lines = [recipient_addr["name"].upper()]
@@ -144,25 +178,20 @@ def generate_label(return_addr, recipient_addr, output_path):
         rec_lines.append(recipient_addr["line2"].upper())
     rec_lines.append(format_city_line(recipient_addr).upper())
 
-    REC_FONT = "Helvetica"
-    REC_SIZE = 11.5
-    LINE_H_REC = 15
-
+    REC_FONT, REC_SIZE, LINE_H = "Helvetica", 11.5, 15
     c.setFont(REC_FONT, REC_SIZE)
     max_w   = max(c.stringWidth(l, REC_FONT, REC_SIZE) for l in rec_lines)
     block_x = (W - max_w) / 2
-    total_h = len(rec_lines) * LINE_H_REC
-    start_y = (H / 2) + (total_h / 2) - LINE_H_REC * 0.3
+    start_y = (H / 2) + (len(rec_lines) * LINE_H / 2) - LINE_H * 0.3
 
     c.setFillColor(colors.black)
     for i, line in enumerate(rec_lines):
-        c.drawString(block_x, start_y - i * LINE_H_REC, line)
+        c.drawString(block_x, start_y - i * LINE_H, line)
 
     c.save()
-    print(f"\n✓ Label saved to: {os.path.abspath(output_path)}")
 
 
-# ── ROTATE PDF 90° CCW ────────────────────────────────────────────────────────
+# ── ROTATE 90° CCW ────────────────────────────────────────────────────────────
 
 def rotate_pdf_ccw(path):
     reader = PdfReader(path)
@@ -177,27 +206,13 @@ def rotate_pdf_ccw(path):
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 
 def main():
+    change_return = "--change-return" in sys.argv
+
     print("=" * 48)
     print("  Envelope Label Generator  (6×4 Landscape)")
     print("=" * 48)
 
-    r = DEFAULT_RETURN
-    print(f"\nReturn address: {r['name']} / {r.get('business','')} / {r['line1']}, {r['city']} {r['state']} {r['zip']}")
-    change = input("Change return address? [y/N]: ").strip().lower()
-    if change == "y":
-        def ask(prompt, key):
-            default = r.get(key, "")
-            val = input(f"  {prompt} [{default}]: ").strip()
-            return val if val else default
-        r = {
-            "name":     ask("Name",      "name"),
-            "business": ask("Business",  "business"),
-            "line1":    ask("Street",    "line1"),
-            "line2":    ask("Apt/Suite", "line2"),
-            "city":     ask("City",      "city"),
-            "state":    ask("State",     "state"),
-            "zip":      ask("ZIP",       "zip"),
-        }
+    return_addr = prompt_return() if change_return else DEFAULT_RETURN
 
     recipient_addr = prompt_recipient()
 
@@ -207,9 +222,9 @@ def main():
     if not out.endswith(".pdf"):
         out += ".pdf"
 
-    generate_label(r, recipient_addr, out)
+    generate_label(return_addr, recipient_addr, out)
     rotate_pdf_ccw(out)
-    print("✓ Rotated 90° CCW")
+    print(f"\n✓ Label saved to: {os.path.abspath(out)}")
 
 
 if __name__ == "__main__":
